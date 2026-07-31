@@ -10,6 +10,10 @@
 # TOPOLOGY SWITCH (Jul 31, 2026): set TOPOLOGY=crs812 when running through the
 # MikroTik switch fabric (RoCE works, needs --privileged + f0 ports), or
 # TOPOLOGY=direct for the legacy direct DAC (Socket NCCL, f1 ports on 9105).
+# TOPOLOGY=crs812-100g (Aug 1, 2026): same fabric but 4x100G breakout on the
+# second ports (f1). GID layout differs per node on f1 (IPv4-mapped GID is
+# index 5 on 9105 but 3 on bdea), so GID_INDEX must NOT be pinned — let NCCL
+# auto-select. Verified: NET/IB init COMPLETE both ranks at 100G.
 
 set -euo pipefail
 
@@ -22,7 +26,7 @@ GPU_MEM=0.85
 MAX_LEN=32768
 EXTRA_FLAGS="--load-format fastsafetensors --enable-auto-tool-choice --tool-call-parser minimax_m2 --reasoning-parser minimax_m2"
 CONTAINER_NAME="vllm-2node"
-WORKER_SSH="spark-worker"
+WORKER_SSH="${WORKER_SSH:-vikassridhar@100.82.15.7}"
 TOPOLOGY="${TOPOLOGY:-crs812}"   # crs812 | direct
 
 # ---- Cluster topology ----
@@ -36,6 +40,12 @@ if [ "$TOPOLOGY" = "crs812" ]; then
   PRIV="--privileged"                 # required: exposes /dev/infiniband for RDMA
   NCCL_HCA="rocep1s0f0"
   NCCL_EXTRA="-e NCCL_IB_GID_INDEX=3" # RoCE+GDR through switch: 40-51 GB/s BusBW
+elif [ "$TOPOLOGY" = "crs812-100g" ]; then
+  HEAD_IFACE="enp1s0f1np1"            # 4x100G breakout, second ports
+  WORKER_IFACE="enp1s0f1np1"
+  PRIV="--privileged"
+  NCCL_HCA="rocep1s0f1"
+  NCCL_EXTRA=""                       # GID auto-select (f1 GID layout differs per node)
 else
   HEAD_IFACE="enp1s0f1np1"     # 9105 direct-DAC port
   WORKER_IFACE="enp1s0f0np0"   # bdea direct-DAC port (asymmetric!)
