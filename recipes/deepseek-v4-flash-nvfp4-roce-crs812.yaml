@@ -1,0 +1,75 @@
+# Recipe: DeepSeek-V4-Flash-NVFP4-FP8 on 2× DGX Spark via CRS812 switch fabric
+#
+# Model: RedHatAI/DeepSeek-V4-Flash-NVFP4-FP8 (162.7B MoE, ~153 GB on disk)
+# Networking: RoCEv2 via MikroTik CRS812 fabric (verified Jul 31, 2026 —
+#   RoCE works through the switch, NCCL BusBW 40-51 GB/s).
+#   For the DIRECT DAC fallback, use deepseek-v4-flash-nvfp4-roce.yaml.
+#
+# Prerequisites:
+#   1. CRS812 configured per references/crs812-switch-fabric.md (8 lanes enabled, masters bridged)
+#   2. CX7 IPs up: 10.10.10.1/24 on enp1s0f0np0 (9105), 10.10.10.2/24 (bdea)
+#   3. Model in HF cache on BOTH nodes
+#   4. Containers launched with --privileged (or /dev/infiniband mapped) — REQUIRED for RDMA.
+#      NCCL 2.30: NCCL_NET=IB is fatal if devices not visible; this recipe omits NCCL_NET
+#      and pins the device explicitly instead.
+
+recipe_version: '2'
+name: DeepSeek-V4-Flash-NVFP4-TP2-DGX-Spark-CRS812
+description: >
+  DeepSeek-V4-Flash NVFP4+FP8 mixed quant (162.7B MoE, 256 experts)
+  on 2× DGX Spark / GB10 with TP=2 via RoCEv2 over the CRS812 switch fabric.
+
+model: RedHatAI/DeepSeek-V4-Flash-NVFP4-FP8
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+cluster_only: true
+skip_model_download: true
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  gpu_memory_utilization: 0.85
+  max_model_len: 32768
+  max_num_batched_tokens: 16384
+  load_format: auto
+  kv_cache_dtype: fp8
+
+env:
+  # --- RoCEv2 via CRS812 (cabled port = f0 on Card 1, both nodes) ---
+  NCCL_IB_HCA: "rocep1s0f0"
+  NCCL_IB_GID_INDEX: "3"
+  NCCL_SOCKET_IFNAME: "enp1s0f0np0"
+  # --- General ---
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  TORCH_CUDA_ARCH_LIST: "12.1a"
+  # --- NVFP4 path ---
+  VLLM_NVFP4_GEMM_BACKEND: flashinfer-cutlass
+  VLLM_USE_FLASHINFER_MOE_FP4: "1"
+  VLLM_FLASHINFER_MOE_BACKEND: throughput
+
+# Only needed for vLLM < 0.22.0. Remove if container has v0.22.0+.
+pre_exec:
+  - copy: /home/YOUR_USER/dsv4_mod
+    dest: /workspace/mods/dsv4_mod
+  - "python3 /workspace/mods/dsv4_mod/patch_pr41276.py"
+
+command: |
+  vllm serve RedHatAI/DeepSeek-V4-Flash-NVFP4-FP8 \
+    --host {host} \
+    --port {port} \
+    --trust-remote-code \
+    --dtype auto \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --load-format {load_format} \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enforce-eager \
+    -tp {tensor_parallel} \
+    -pp {pipeline_parallel}
+
+runtime: vllm-distributed

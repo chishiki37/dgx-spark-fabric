@@ -1,0 +1,41 @@
+recipe_version: '2'
+model: cyankiwi/MiniMax-M2.7-AWQ-4bit
+runtime: vllm
+builder: eugr
+min_nodes: 2
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+skip_model_download: true
+metadata:
+  description: "MiniMax-M2.7-AWQ, 2-node via CRS812 switch fabric — RoCE+GDR (GID 3, verified Jul 31 2026; NCCL BusBW 40-51 GB/s). REQUIRES --privileged on containers (sparkrun: check it passes /dev/infiniband; manual docker: add --privileged). For DIRECT DAC fallback use minimax-m2.7-awq-roce.yaml (f1 ports, GID 4)."
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  gpu_memory_utilization: 0.80
+  max_model_len: 196608
+  load_format: fastsafetensors
+  tool_call_parser: minimax_m2
+  reasoning_parser: minimax_m2
+  served_model_name: minimax-m2.7
+env:
+  # CRS812 topology: cabled port is f0 on Card 1 (both nodes identical)
+  NCCL_IB_HCA: "rocep1s0f0"
+  NCCL_IB_GID_INDEX: "3"
+  NCCL_SOCKET_IFNAME: "enp1s0f0np0"
+  # NCCL 2.30: do NOT set NCCL_NET=IB unless devices verified visible in container
+  # (/dev/infiniband present => --privileged), or NCCL dies with "Failed to initialize any NET plugin"
+command: |-
+  vllm serve {model} \
+    --trust-remote-code \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    -tp {tensor_parallel} \
+    -pp {pipeline_parallel} \
+    --max-model-len {max_model_len} \
+    --load-format {load_format} \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name}
