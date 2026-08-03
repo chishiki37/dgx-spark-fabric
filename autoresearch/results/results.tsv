@@ -1,0 +1,4 @@
+experiment_id	commit_hash	config_desc	single_stream_tps	prefill_2k_ttft	prefill_8k_ttft	prefill_32k_ttft	concurrency_C4_agg_tps	correctness	status	notes
+0	baseline	reasoning_effort=medium, gpu_mem=0.75, max_model_len=65536, block_size=256, max_num_seqs=4, max_batched=8192, prefix_cache=on	27.4	10.07	12.47	7.19	64.6	2/3+1bug	BASELINE	reasoning model uses all tokens thinking on 20-token queries; fixed harness to 100+ tokens
+3	exp3	max-num-seqs 4→8, rest=baseline	27.2	NA	NA	NA	C4=65.6/C8=84.5	3/3	WIN	C4 agg +1.5%, C8=84.5tps new capability, decode neutral, correctness pass
+6	exp6	VLLM_USE_BREAKABLE_CUDAGRAPH=1 + seqs=8	26.9	NA	NA	NA	C4=64.9/C8=100.9	3/3	WIN	C8 +19.4% (84.5→100.9tok/s)! Breakable graphs reduce batch-transition stalls at high concurrency.
